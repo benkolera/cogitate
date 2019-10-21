@@ -6,15 +6,26 @@
     # Uncomment and set this to `true` to indicate your acceptance:
     # config.android_sdk.accept_license = false;
   }
+, projectOverrides ? {}
 }:
 with obelisk;
-project ./. ({ pkgs, hackGet, ... }: {
+project ./. ({ hackGet, pkgs, ... }:
+  let
+    beamSrc = hackGet dep/beam;
+    gargoyleSrc = hackGet dep/gargoyle;
+  in {
   android.applicationId = "systems.obsidian.obelisk.examples.minimal";
   android.displayName = "Obelisk Minimal Example";
   ios.bundleIdentifier = "systems.obsidian.obelisk.examples.minimal";
   ios.bundleName = "Obelisk Minimal Example";
-  overrides = pkgs.lib.composeExtensions (pkgs.callPackage (hackGet ./dep/rhyolite) {}).haskellOverrides
-    (self: super: with pkgs.haskell.lib; {
-      # Your custom overrides go here.
-    });
-})
+
+  packages = {
+    beam-core = beamSrc + /beam-core;
+    beam-postgres = beamSrc + /beam-postgres;
+    beam-migrate = beamSrc + /beam-migrate;
+  };
+
+  overrides = self: super: {
+    beam-postgres = pkgs.haskell.lib.dontCheck super.beam-postgres;  # Requires PG to run tests
+  } // import gargoyleSrc self;
+} // projectOverrides)
