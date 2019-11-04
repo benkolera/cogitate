@@ -18,7 +18,13 @@ import Data.Aeson.TH (deriveJSON)
 import Data.Aeson.GADT.TH (deriveJSONGADT)
 import Data.Constraint.Extras.TH (deriveArgDict)
 import Data.Witherable (Witherable (wither))
+import qualified Data.Map as Map
+import qualified Data.Map.Merge.Lazy as Map
+import qualified Data.Map.Monoidal as MMap
 import Data.MonoidMap (MonoidMap)
+import Data.Semigroup (First (..))
+import Data.Sequence (Seq)
+import qualified Data.Sequence as Seq
 import Reflex.Query.Class (Query (QueryResult, crop), SelectedCount (..))
 import Reflex.Patch (Additive, Group (negateG))
 import Rhyolite.App (PositivePart (positivePart), standardPositivePart)
@@ -28,6 +34,7 @@ import Common.Schema
 
 data PublicRequest a where
   PublicRequest_NoOp :: PublicRequest ()
+  PublicRequest_CreateEntry :: Text -> Text -> PublicRequest EntryId
 deriving instance Show a => Show (PublicRequest a)
 
 fmap concat $ sequence
@@ -57,21 +64,27 @@ instance Witherable Option where
   {-# INLINE wither #-}
 
 data ViewSelector a = ViewSelector
-  {
+  { _viewSelector_entries :: !(MonoidalMap EntryId a)
   }
   deriving (Eq, Functor, Generic)
 deriveJSON Json.defaultOptions 'ViewSelector
 makeLenses 'ViewSelector
 instance Semigroup a => Semigroup (ViewSelector a) where
-  _a <> _b = ViewSelector
+  a <> b = ViewSelector
+    { _viewSelector_entries = _viewSelector_entries a <> _viewSelector_entries b
+    }
 instance Semigroup a => Monoid (ViewSelector a) where
-  mempty = ViewSelector
+  mempty = ViewSelector mempty
   mappend = (<>)
 instance Semialign ViewSelector where
-  alignWith _f _a _b = ViewSelector
-  zipWith _f _a _b = ViewSelector
+  alignWith f a b = ViewSelector
+    { _viewSelector_entries = alignWith f (_viewSelector_entries a) (_viewSelector_entries b)
+    }
+  zipWith f a b = ViewSelector
+    { _viewSelector_entries = Align.zipWith f (_viewSelector_entries a) (_viewSelector_entries b)
+    }
 instance Align ViewSelector where
-  nil = ViewSelector
+  nil = ViewSelector nil
 instance (Group a) => Group (ViewSelector a) where
   negateG = fmap negateG
 instance (Semigroup a) => Additive (ViewSelector a)
@@ -80,19 +93,45 @@ instance (Ord k) => PositivePart (ViewSelector (MonoidMap k SelectedCount)) wher
     let u = mapMaybe standardPositivePart x
     in if u == mempty then Nothing else Just u
 instance Filterable ViewSelector where
-  mapMaybe _f _x = ViewSelector
-instance (Monoid a) => Query (ViewSelector a) where
+  mapMaybe f x = ViewSelector
+    { _viewSelector_entries = mapMaybe f (_viewSelector_entries x)
+    }
+instance (Eq a, Ord a, Monoid a) => Query (ViewSelector a) where
   type QueryResult (ViewSelector a) = View a
-  crop _vs _v = View
+  crop vs v = View
+    { _view_entries = croppedIntersectionWith (flip const) (_viewSelector_entries vs) (_view_entries v)
+    }
+-- Intersect a map from the viewselector and a map from the view to produce a cropped map for the view, dropping any key for which the entry is selected mempty (zero) times.
+croppedIntersectionWith :: (Ord k, Eq a, Monoid a) => (a -> b -> c) -> MonoidalMap k a -> MonoidalMap k b -> MonoidalMap k c
+croppedIntersectionWith f (MMap.MonoidalMap m) (MMap.MonoidalMap m') = MMap.MonoidalMap $
+  Map.merge
+    Map.dropMissing
+    Map.dropMissing
+    (Map.zipWithMaybeMatched (\_ a v -> if a == mempty then Nothing else Just (f a v)))
+    m
+    m'
 
 data View a = View
+  { _view_entries :: !(MonoidalMap EntryId (a, First Entry))
+  }
   deriving (Eq, Foldable, Functor, Generic)
 deriveJSON Json.defaultOptions 'View
 makeLenses 'View
 instance Monoid a => Semigroup (View a) where
-  _a <> _b = View
+  a <> b = View
+    { _view_entries = _view_entries a <> _view_entries b
+    }
 instance Monoid a => Monoid (View a) where
-  mempty = View 
+  mempty = View mempty
   mappend = (<>)
 instance Filterable View where
-  mapMaybe _f _x = View
+  mapMaybe f x = View
+    { _view_entries = mapMaybeView f (_view_entries x)
+    }
+    
+mapMaybeView
+  :: forall f v a b. (Filterable f)
+  => (a -> Maybe b)
+  -> f (a, v)
+  -> f (b, v)
+mapMaybeView f = mapMaybe ((_1 :: (a -> Maybe b) -> (a, v) -> Maybe (b, v)) f)

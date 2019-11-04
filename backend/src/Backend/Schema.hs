@@ -38,7 +38,7 @@ import Common.Prelude
 import Common.Schema
 
 data Db f = Db
-  { _dbTopic :: f (TableEntity TopicT)
+  { _dbEntry :: f (TableEntity EntryT)
   }
   deriving stock Generic
   deriving anyclass (Database be)

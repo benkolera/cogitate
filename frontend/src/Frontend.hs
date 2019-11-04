@@ -6,12 +6,14 @@
 module Frontend where
 
 import Control.Monad.Fix (MonadFix)
+import qualified Data.Map.Monoidal as MMap
+import Data.Semigroup (getFirst)
 import Obelisk.Configs (HasConfigs)
 import Obelisk.Frontend (Frontend (..))
 import Obelisk.Route.Frontend
 import Reflex.Dom.Core
-import Rhyolite.Api (ApiRequest)
-import Rhyolite.Frontend.App (RhyoliteWidget, functorToWire, runObeliskRhyoliteWidget)
+import Rhyolite.Api (ApiRequest(ApiRequest_Public))
+import Rhyolite.Frontend.App (RhyoliteWidget, functorToWire, runObeliskRhyoliteWidget, watchViewSelector)
 
 import Obelisk.Generated.Static
 
@@ -33,7 +35,7 @@ headSection = do
   elAttr "meta" ("charset"=:"utf-8") blank
   elAttr "meta" ("name"=:"viewport" <> "content"=:"width=device-width, initial-scale=1") blank
   elAttr "link" ("rel"=:"stylesheet" <> "type"=:"text/css" <> "href"=: static @"css/bulma.css") blank
-  el "title" $ text "Something"
+  el "title" $ text "Cogitate"
   elAttr "script" ("defer"=:"defer"<> "src"=:"https://use.fontawesome.com/releases/v5.3.1/js/all.js") blank
 
 runAppWidget ::
@@ -70,7 +72,7 @@ navBar
 navBar =
   elAttr "nav" ("class"=:"navbar" <> "role"=:"navigation" <> "aria-label"=:"main navigation") $ do
     divClass "navbar-brand" $
-      elAttr "a" ("class"=:"navbar-item" <> "href"=:"https://bulma.io") $ text "Tree of Life"
+      elAttr "a" ("class"=:"navbar-item" <> "href"=:"https://bulma.io") $ text "Cogitate"
 
     (burgerEl, ()) <- elAttr' "a" ("role"=:"button" <> "class"=:"navbar-burger burger" <> "aria-label"=:"menu") $ do
       let ln = elAttr "span" ("aria-hidden"=:"true") blank
@@ -103,4 +105,21 @@ appWidget
   => m ()
 appWidget = do
   el "h1" $ text "Butts"
+  eClick <- button "Click me"
+  eNewEntryId <- requesting $ ApiRequest_Public (PublicRequest_CreateEntry "butts" "tetaotaota") <$ eClick
+  dmEntryId <- holdDyn Nothing $ Just . runIdentity <$> eNewEntryId
+  dyn_ $ ffor dmEntryId $ \case
+    Nothing -> text "Add an entry"
+    Just entryId -> do
+      dEntry <- watchEntries (pure entryId)
+      display dEntry
   pure ()
+
+watchEntries
+  :: (HasApp t m, MonadHold t m, MonadFix m)
+  => Dynamic t EntryId
+  -> m (Dynamic t (Maybe Entry))
+watchEntries dEntryId = do
+  res :: Dynamic t (View SelectedCount) <- watchViewSelector $ ffor dEntryId $ \entryId -> (mempty :: ViewSelector SelectedCount)
+    { _viewSelector_entries = MMap.singleton entryId 1 }
+  pure . ffor2 dEntryId res $ \entryId r -> r ^? view_entries . ix entryId . _2 . to getFirst
