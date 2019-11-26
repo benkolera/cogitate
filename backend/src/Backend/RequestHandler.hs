@@ -17,15 +17,20 @@ requestHandler runTransaction =
   RequestHandler $ runTransaction . \case
     ApiRequest_Public r -> case r of
       PublicRequest_NoOp -> pure ()
-      PublicRequest_CreateEntry title body -> runQuery $ do
-        [entryT] <- Ext.runInsertReturningList $ insert (_dbEntry db) $ (insertExpressions
-          [ Entry
-            { _entryId = default_
-            , _entryTitle = val_ title
-            , _entryText = val_ body
-            }
-          ])
-        pure (EntryId $ _entryId entryT)
+      PublicRequest_CreateEntry title body -> do
+
+        eId <- runQuery $ do
+          [entryT] <- Ext.runInsertReturningList $ insert (_dbEntry db) $ (insertExpressions
+            [ Entry
+              { _entryId = default_
+              , _entryTitle = val_ title
+              , _entryText = val_ body
+              }
+            ])
+          pure  (EntryId $ _entryId entryT)
+
+        notify Notification_Entry (Added, eId)
+        pure eId
 
     ApiRequest_Private _key r -> case r of
       PrivateRequest_NoOp -> return ()

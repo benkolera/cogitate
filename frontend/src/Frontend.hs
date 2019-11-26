@@ -1,19 +1,31 @@
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Frontend where
 
+import Control.Lens
+
+import Control.Monad (join)
 import Control.Monad.Fix (MonadFix)
 import qualified Data.Map.Monoidal as MMap
+import qualified Data.Text.Lazy as TL
+import GHCJS.DOM.Document (createElement)
+import GHCJS.DOM.Element (setInnerHTML)
+import GHCJS.DOM.Types (liftJSM)
+import qualified Lucid                  as L
 import Data.Semigroup (getFirst)
+import qualified Data.Set as Set
 import Obelisk.Configs (HasConfigs)
 import Obelisk.Frontend (Frontend (..))
 import Obelisk.Route.Frontend
 import Reflex.Dom.Core
 import Rhyolite.Api (ApiRequest(ApiRequest_Public))
 import Rhyolite.Frontend.App (RhyoliteWidget, functorToWire, runObeliskRhyoliteWidget, watchViewSelector)
+import qualified Text.MMark as MMark
 
 import Obelisk.Generated.Static
 
@@ -27,7 +39,7 @@ frontend :: Frontend (R FrontendRoute)
 frontend = Frontend
   { _frontend_head = headSection
   , _frontend_body = runAppWidget $ skeleton $ subRoute_ $ \case
-      FrontendRoute_Main -> appWidget 
+      FrontendRoute_Main -> appWidget
   }
 
 headSection :: DomBuilder t m => m ()
@@ -101,25 +113,75 @@ type HasApp t m =
   )
 
 appWidget
-  :: forall m t. (HasApp t m, DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m)
+  :: forall m t js. (Prerender js t m, HasApp t m, DomBuilder t m, PostBuild t m, MonadHold t m, MonadFix m)
   => m ()
 appWidget = do
   el "h1" $ text "Butts"
   eClick <- button "Click me"
-  eNewEntryId <- requesting $ ApiRequest_Public (PublicRequest_CreateEntry "butts" "tetaotaota") <$ eClick
-  dmEntryId <- holdDyn Nothing $ Just . runIdentity <$> eNewEntryId
-  dyn_ $ ffor dmEntryId $ \case
-    Nothing -> text "Add an entry"
-    Just entryId -> do
-      dEntry <- watchEntries (pure entryId)
-      display dEntry
-  pure ()
+  _ <- requesting $ ApiRequest_Public (PublicRequest_CreateEntry "butts" "# Butts 2\n\ntetaotaota") <$ eClick
+  dEntryIds <- watchEntryIds
+  dEntries :: Dynamic t (MMap.MonoidalMap EntryId Entry) <- watchEntries (fromMaybe Set.empty <$> dEntryIds)
+  void $ list (MMap.getMonoidalMap <$> dEntries) $ \dEntry -> do
+    entryContent (Just <$> dEntry)
+
+entryContent
+  :: forall t js m
+  .  ( DomBuilder t m
+     , Prerender js t m
+     )
+  => Dynamic t (Maybe Entry)
+  -> m ()
+entryContent dEntry = prerender_ (text "Rendering Document...") $ do
+  let dHtml = fromMaybe "" . (fmap (markDownToHtml5 . _entryText)) <$> dEntry
+  elClass "div" "row entry-content" $ do
+    d <- askDocument
+    -- We have to sample the initial value to set it on creation
+    htmlT <- sample . current $ dHtml
+    e <- liftJSM $ do
+      -- This wont execute scripts, but will allow users to XSS attack through
+      -- event handling javascript attributes in any raw HTML that is let
+      -- through the markdown renderer. But this is the simplest demo that
+      -- mostly works. See https://github.com/qfpl/reflex-dom-template for a
+      -- potentially more robust solution (we could filter out js handler attrs
+      -- with something like that).
+      -- It's worth noting that the react demo app does exactly what this does:
+      -- https://github.com/gothinkster/react-redux-realworld-example-app/blob/master/src/components/Article/index.js#L60
+      e <- createElement d ("div" :: String)
+      setInnerHTML e htmlT
+      pure e
+    -- And make sure we update the html when the article changes
+    performEvent_ $ (liftJSM . setInnerHTML e) <$> updated dHtml
+    -- Put out raw element into our DomBuilder
+    placeRawElement e
+
+markDownToHtml5 :: Text -> Text
+markDownToHtml5 t =
+  case MMark.parse "" t of
+    Left _  -> ""
+    Right r -> TL.toStrict . L.renderText . MMark.render $ r
+
+watchEntryIds
+  :: (HasApp t m, MonadHold t m, MonadFix m)
+  =>  m (Dynamic t (Maybe (Set.Set EntryId)))
+watchEntryIds = do
+  res :: Dynamic t (View SelectedCount) <- watchViewSelector $ constDyn $ (mempty :: ViewSelector SelectedCount)
+    { _viewSelector_entryIds = pure 1 }
+  pure $ ffor res $ \r -> r ^? view_entryIds . to getOption . _Just . _2
 
 watchEntries
   :: (HasApp t m, MonadHold t m, MonadFix m)
+  => Dynamic t (Set EntryId)
+  -> m (Dynamic t (MMap.MonoidalMap EntryId Entry))
+watchEntries dEntryIds = do
+  res :: Dynamic t (View SelectedCount) <- watchViewSelector $ ffor dEntryIds $ \entryIds -> (mempty :: ViewSelector SelectedCount)
+    { _viewSelector_entries = MMap.fromList . fmap (,1) . Set.toList $ entryIds }
+  pure . ffor res $ \r -> fmap (^. _2 . to getFirst) (r ^. view_entries)
+
+watchEntry
+  :: (HasApp t m, MonadHold t m, MonadFix m)
   => Dynamic t EntryId
   -> m (Dynamic t (Maybe Entry))
-watchEntries dEntryId = do
+watchEntry dEntryId = do
   res :: Dynamic t (View SelectedCount) <- watchViewSelector $ ffor dEntryId $ \entryId -> (mempty :: ViewSelector SelectedCount)
     { _viewSelector_entries = MMap.singleton entryId 1 }
   pure . ffor2 dEntryId res $ \entryId r -> r ^? view_entries . ix entryId . _2 . to getFirst

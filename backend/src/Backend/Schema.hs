@@ -61,7 +61,8 @@ data Change = Added | Deleted deriving (Bounded, Enum, Eq, Generic, Show)
 deriveJSON Json.defaultOptions ''Change
 
 data Notification a where
-  Notification_Noop :: Notification Change
+  Notification_Entry :: Notification (Change, EntryId)
+
 deriving instance Show (Notification a)
 fmap concat $ sequence
   [ deriveJSONGADT ''Notification

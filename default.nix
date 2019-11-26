@@ -23,9 +23,22 @@ project ./. ({ hackGet, pkgs, ... }:
     beam-core = beamSrc + /beam-core;
     beam-postgres = beamSrc + /beam-postgres;
     beam-migrate = beamSrc + /beam-migrate;
+    mmark = hackGet dep/mmark;
+    megaparsec = hackGet dep/megaparsec;
   };
 
-  overrides = self: super: {
-    beam-postgres = pkgs.haskell.lib.dontCheck super.beam-postgres;  # Requires PG to run tests
+  overrides = self: super: with pkgs.haskell.lib; {
+    beam-core = dontCheck super.beam-core;
+    beam-postgres = dontCheck super.beam-postgres;  # Requires PG to run tests
+    email-validate = dontCheck super.email-validate;
+    versions = self.callHackage "versions" "3.5.1" {};
+    temporary = dontCheck super.temporary;
+    unliftio = dontCheck super.unliftio;
+    neat-interpolation = doJailbreak super.neat-interpolation;
+    mmark = dontCheck (dontHaddock super.mmark);
+    modern-uri = dontCheck (doJailbreak super.modern-uri);
+    mono-traversable = dontCheck super.mono-traversable;
+    conduit = dontCheck super.conduit;
+    yaml = dontCheck super.yaml;
   } // import gargoyleSrc self;
 } // projectOverrides)

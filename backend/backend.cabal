@@ -9,11 +9,16 @@ library
     buildable: False
   build-depends:
       base
+    , common
+    , aeson
+    , aeson-gadt-th
     , beam-core
     , beam-migrate
     , beam-postgres
-    , common
+    , bytestring
     , constraints-extras
+    , dependent-sum
+    , dependent-sum-template
     , exceptions
     , gargoyle-postgresql-connect
     , IntervalMap
@@ -30,6 +35,7 @@ library
     , rhyolite-backend
     , safe-exceptions
     , snap-core
+    , text
     , witherable
   exposed-modules:
     Backend

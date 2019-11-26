@@ -8,8 +8,12 @@ library
   build-depends:
       base
     , common
+    , ghcjs-dom
+    , jsaddle-dom
     , IntervalMap
     , lens
+    , lucid
+    , mmark
     , monoidal-containers
     , obelisk-executable-config-lookup
     , obelisk-frontend
